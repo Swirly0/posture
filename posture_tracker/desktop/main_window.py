@@ -25,6 +25,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._settings: Optional[SettingsDialog] = None
         self._overlay_was_active: bool = False
+        self._engine_running: bool = False
 
         self._build_ui()
         self._wire_signals()
@@ -52,6 +53,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # Hide overlay immediately (stop is async).
         self._overlay.hide()
         self._overlay_was_active = False
+        self._engine_running = False
         self._engine.stop()
 
     def _set_preview_message(self, text: str) -> None:
@@ -151,10 +153,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self._engine.error.connect(self._on_error)
 
     def _on_running(self, running: bool) -> None:
+        self._engine_running = bool(running)
         self._btn_start.setEnabled(not running)
         self._btn_stop.setEnabled(running)
         if not running:
             self._set_preview_message("Stopped")
+            self._overlay.hide()
+            self._overlay_was_active = False
 
     def _on_preview_toggled(self, enabled: bool) -> None:
         self._engine.set_show_preview(bool(enabled))
@@ -215,6 +220,11 @@ class MainWindow(QtWidgets.QMainWindow):
                 )
 
     def _on_alert(self, active: bool) -> None:
+        # During/after stop we may still receive queued alert signals; never show overlay unless running.
+        if not self._engine_running:
+            self._overlay.hide()
+            self._overlay_was_active = False
+            return
         if not self._cfg.overlay.enabled:
             self._overlay.hide()
             self._overlay_was_active = False

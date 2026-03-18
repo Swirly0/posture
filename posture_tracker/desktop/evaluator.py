@@ -21,7 +21,8 @@ class PostureEvaluator:
     bad_posture_grace_seconds: float = 3.0
     hysteresis_off_seconds: float = 0.4
 
-    _calibration_data: List[Tuple[float, float]] = field(default_factory=list)
+    # (gap, tilt, z_depth)
+    _calibration_data: List[Tuple[float, float, float]] = field(default_factory=list)
     _is_calibrating: bool = False
     _is_calibrated: bool = False
     _bad_start: Optional[float] = None
@@ -52,12 +53,18 @@ class PostureEvaluator:
         return len(self._calibration_data), self.calibration_samples_needed
 
     def _finish_calibration(self) -> Thresholds:
-        avg_gap = sum(g for g, z in self._calibration_data) / max(1, len(self._calibration_data))
-        avg_z = sum(z for g, z in self._calibration_data) / max(1, len(self._calibration_data))
+        n = max(1, len(self._calibration_data))
+        avg_gap = sum(g for g, t, z in self._calibration_data) / n
+        avg_tilt = sum(t for g, t, z in self._calibration_data) / n
+        avg_z = sum(z for g, t, z in self._calibration_data) / n
+
+        # Tilt is considered "bad" when tilt > threshold. Set the calibrated tilt
+        # above the baseline to allow natural asymmetry/jitter.
+        calibrated_tilt = max(avg_tilt * 2.0, avg_tilt + 0.015)
         calibrated = Thresholds(
             gap=avg_gap * 0.85,
             z=avg_z * 1.30,
-            tilt=self.thresholds.tilt,
+            tilt=calibrated_tilt,
         )
         self.thresholds = calibrated
         self._is_calibrated = True
@@ -69,7 +76,7 @@ class PostureEvaluator:
         self.thresholds = thresholds
 
         if self._is_calibrating:
-            self._calibration_data.append((gap, z_depth))
+            self._calibration_data.append((gap, tilt, z_depth))
             done, total = self.calibration_progress
             if done >= total:
                 calibrated = self._finish_calibration()

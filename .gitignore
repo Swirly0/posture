@@ -1,3 +1,16 @@
 posture_tracker/__pycache__/
 venv
 __pycache__/
+dist_mediapipe/
+build_mediapipe/
+dist/
+build/
+*.pyc
+.venv/
+
+# Keep PyInstaller spec tracked (source-of-truth for builds).
+# SmartPostureTracker.spec
+
+# OS/editor
+.DS_Store
+Thumbs.db
