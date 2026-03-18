@@ -99,5 +99,5 @@ def effective_thresholds(cfg: AppConfig) -> Thresholds:
         return cfg.manual_thresholds
     if cfg.is_calibrated:
         return cfg.calibrated_thresholds
-    return cfg.calibrated_thresholds
+    return Thresholds()
 

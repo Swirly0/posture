@@ -122,7 +122,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_metrics(self, gap: float, tilt: float, z: float) -> None:
         self._metrics.setText(f"gap: {gap:.4f}   tilt: {tilt:.4f}   z: {z:.4f}")
-        if self._settings:
+        if self._settings and not self._cfg.is_calibrated:
             self._settings.set_calibration_status(
                 "Calibration sets your baseline thresholds.\n"
                 "Sit with good posture and hold still while the app samples."
