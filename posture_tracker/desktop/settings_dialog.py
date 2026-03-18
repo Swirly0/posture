@@ -133,8 +133,17 @@ class SettingsDialog(QtWidgets.QDialog):
 
     def set_calibrated_thresholds(self, t: Thresholds) -> None:
         self._cfg.calibrated_thresholds = t
+        # Also update manual defaults so users can tweak after calibrating.
+        self._cfg.manual_thresholds = t
         self._cfg.is_calibrated = True
         save_config(self._cfg)
+        # Reflect new defaults in the tuning tab without emitting change signals.
+        with QtCore.QSignalBlocker(self._spin_gap):
+            self._spin_gap.setValue(float(t.gap))
+        with QtCore.QSignalBlocker(self._spin_z):
+            self._spin_z.setValue(float(t.z))
+        with QtCore.QSignalBlocker(self._spin_tilt):
+            self._spin_tilt.setValue(float(t.tilt))
 
     def _load_manual_values(self) -> None:
         t = self._cfg.manual_thresholds

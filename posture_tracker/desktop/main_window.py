@@ -4,7 +4,7 @@ from typing import Optional
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
-from .config import AppConfig, load_config, save_config
+from .config import AppConfig, effective_thresholds, load_config, save_config
 from .engine import EngineFrame, PostureEngine
 from .overlay import WarningOverlay
 from .qt_utils import bgr_to_qimage
@@ -30,6 +30,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._wire_signals()
 
         self._apply_overlay_position()
+        # Start posture tracking automatically on launch
+        QtCore.QTimer.singleShot(0, self._engine.start)
 
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:  # noqa: N802
         self._engine.stop()
@@ -60,8 +62,19 @@ class MainWindow(QtWidgets.QMainWindow):
         left.addLayout(status_row)
 
         self._metrics = QtWidgets.QLabel("gap: —   tilt: —   z: —", central)
-        self._metrics.setStyleSheet("color:#666;")
+        self._metrics.setStyleSheet("color:#000;")
+        self._metrics.setTextFormat(QtCore.Qt.TextFormat.RichText)
         left.addWidget(self._metrics)
+
+        self._metrics_help = QtWidgets.QLabel(central)
+        self._metrics_help.setWordWrap(True)
+        self._metrics_help.setStyleSheet("color:#555; font-size: 11px;")
+        self._metrics_help.setText(
+            "gap: vertical distance from shoulders to ears (slouching lowers it)\n"
+            "tilt: difference between left and right shoulder height (side lean)\n"
+            "z: how far your head is from the camera (forward head posture)"
+        )
+        left.addWidget(self._metrics_help)
 
         controls = QtWidgets.QGroupBox("Controls", central)
         right.addWidget(controls)
@@ -121,7 +134,21 @@ class MainWindow(QtWidgets.QMainWindow):
         QtWidgets.QMessageBox.critical(self, "Error", msg)
 
     def _on_metrics(self, gap: float, tilt: float, z: float) -> None:
-        self._metrics.setText(f"gap: {gap:.4f}   tilt: {tilt:.4f}   z: {z:.4f}")
+        thresholds = effective_thresholds(self._cfg)
+        gap_bad = gap < thresholds.gap
+        tilt_bad = tilt > thresholds.tilt
+        z_bad = z < thresholds.z
+
+        def fmt(value: float, bad: bool) -> str:
+            color = "#ff5555" if bad else "#000000"
+            return f"<span style='color:{color};'>{value:.4f}</span>"
+
+        text = (
+            f"gap: {fmt(gap, gap_bad)}   "
+            f"tilt: {fmt(tilt, tilt_bad)}   "
+            f"z: {fmt(z, z_bad)}"
+        )
+        self._metrics.setText(text)
         if self._settings and not self._cfg.is_calibrated:
             self._settings.set_calibration_status(
                 "Calibration sets your baseline thresholds.\n"
@@ -170,6 +197,8 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_calibrated(self, thresholds) -> None:
         self._cfg.is_calibrated = True
         self._cfg.calibrated_thresholds = thresholds
+        # Use calibrated values as the new manual defaults so users can tweak from baseline.
+        self._cfg.manual_thresholds = thresholds
         save_config(self._cfg)
         self._refresh_calibration_banner()
         if self._settings:

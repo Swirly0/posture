@@ -21,7 +21,8 @@ class WarningOverlay(QtWidgets.QWidget):
 
         self._show_text = False
         self._icon = self.style().standardIcon(QtWidgets.QStyle.StandardPixmap.SP_MessageBoxWarning)
-        self._size = QtCore.QSize(84, 84)
+        # Give extra vertical room so text can sit fully below the icon
+        self._size = QtCore.QSize(100, 120)
         self.resize(self._size)
 
     def set_show_text(self, show: bool) -> None:
@@ -42,15 +43,20 @@ class WarningOverlay(QtWidgets.QWidget):
         painter.setPen(QtGui.QPen(QtGui.QColor(255, 255, 255, 140), 1))
         painter.drawRoundedRect(rect, 12, 12)
 
-        icon_rect = QtCore.QRect(10, 10, 64, 64)
+        icon_rect = QtCore.QRect(18, 14, 64, 64)
         self._icon.paint(painter, icon_rect)
 
         if self._show_text:
             painter.setPen(QtGui.QColor(255, 255, 255))
             font = painter.font()
-            font.setPointSize(9)
+            font.setPointSize(10)
             font.setBold(True)
             painter.setFont(font)
-            text_rect = QtCore.QRect(10, 64, rect.width() - 20, rect.height() - 64)
-            painter.drawText(text_rect, QtCore.Qt.AlignmentFlag.AlignCenter, "Fix posture")
+            # Place text in a band clearly below the icon, with padding
+            text_rect = QtCore.QRect(10, 84, rect.width() - 20, rect.height() - 94)
+            painter.drawText(
+                text_rect,
+                QtCore.Qt.AlignmentFlag.AlignHCenter | QtCore.Qt.AlignmentFlag.AlignTop,
+                "Fix posture",
+            )
 
