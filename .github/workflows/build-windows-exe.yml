@@ -3,12 +3,11 @@ name: Build Windows EXE
 on:
   push:
     branches: [main]
+    tags:
+      - "v*"
   workflow_dispatch: {}
   release:
     types: [created]
-  push:
-    tags:
-      - "v*"
 
 permissions:
   contents: write
