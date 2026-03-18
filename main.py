@@ -14,64 +14,75 @@ PoseLandmarkerOptions = vision.PoseLandmarkerOptions
 PoseLandmarkerResult = vision.PoseLandmarkerResult
 VisionRunningMode = vision.RunningMode
 
-# Global States
+# --- Global States ---
 latest_annotated_frame = None
-current_landmarks = None
-posture_status = "Scanning..."
+posture_status = "Initializing..."
 current_metrics = {"gap": 0, "tilt": 0, "z_depth": 0}
 
+# Calibration & Timer Globals
+is_calibrated = False
+calibration_data = []
+thresholds = {"gap": 0.20, "z": -1.10} # Default fallbacks
+bad_posture_start_time = None 
+alert_active = False
+
 def analyze_metrics(landmarks):
-    if not landmarks:
-        return 0, 0, 0
-    
-    # 1. Ear-to-Shoulder Gap (Vertical)
+    if not landmarks: return 0, 0, 0
     left_gap = landmarks[11].y - landmarks[7].y
     right_gap = landmarks[12].y - landmarks[8].y
     avg_gap = (left_gap + right_gap) / 2
-
-    # 2. Shoulder Tilt
     shoulder_tilt = abs(landmarks[11].y - landmarks[12].y)
-
-    # 3. Nose Z-Depth (Forward Lean)
     nose_z = landmarks[0].z
-    
     return avg_gap, shoulder_tilt, nose_z
 
 def result_callback(result: PoseLandmarkerResult, output_image: mp.Image, timestamp_ms: int):
-    global latest_annotated_frame, current_landmarks, posture_status, current_metrics
+    global latest_annotated_frame, posture_status, current_metrics, is_calibrated, calibration_data, thresholds, bad_posture_start_time, alert_active
     
     frame_rgb = output_image.numpy_view()
     annotated_image = np.copy(frame_rgb)
 
     if result.pose_landmarks:
         pose_landmarks = result.pose_landmarks[0]
-        current_landmarks = pose_landmarks 
-        
         gap, tilt, z_depth = analyze_metrics(pose_landmarks)
-        current_metrics["gap"] = gap
-        current_metrics["tilt"] = tilt
-        current_metrics["z_depth"] = z_depth
+        current_metrics.update({"gap": gap, "tilt": tilt, "z_depth": z_depth})
 
-        # --- SENSITIVITY THRESHOLDS ---
-        # 1. Forward Lean (Z-Depth): If nose gets closer than -1.1 (Your slouch was -1.39)
-        if z_depth < -1.10:
-            posture_status = "Warning: Leaning Forward!"
-        # 2. Slouching (Gap): If gap drops below 0.24 (Your good was 0.27, bad was 0.22)
-        elif gap < 0.24:
-            posture_status = "Warning: Sit Up Straight!"
-        # 3. Tilt: If shoulders uneven
-        elif tilt > 0.04:
-            posture_status = "Warning: Uneven Shoulders!"
+        # --- STEP 2: AUTO-CALIBRATION LOGIC ---
+        if not is_calibrated:
+            posture_status = f"CALIBRATING... Hold Still ({len(calibration_data)}/30)"
+            calibration_data.append((gap, z_depth))
+            if len(calibration_data) >= 30:
+                avg_cal_gap = sum(g for g, z in calibration_data) / 30
+                avg_cal_z = sum(z for g, z in calibration_data) / 30
+                # Set thresholds slightly more aggressive than baseline
+                thresholds["gap"] = avg_cal_gap * 0.85 
+                thresholds["z"] = avg_cal_z * 1.30 
+                is_calibrated = True
+        
+        # --- STEP 1: DETECTION & TIMER LOGIC ---
         else:
-            posture_status = "Good Posture"
+            is_bad = (z_depth < thresholds["z"]) or (gap < thresholds["gap"]) or (tilt > 0.06)
+            
+            if is_bad:
+                if bad_posture_start_time is None:
+                    bad_posture_start_time = time.time()
+                
+                elapsed = time.time() - bad_posture_start_time
+                if elapsed > 3.0:
+                    posture_status = f"WARNING: FIX POSTURE! ({int(elapsed)}s)"
+                    alert_active = True
+                else:
+                    posture_status = "Good (grace period)"
+                    alert_active = False
+            else:
+                posture_status = "Good Posture"
+                bad_posture_start_time = None
+                alert_active = False
 
         # Draw skeleton
         drawing_utils.draw_landmarks(
-            image=annotated_image,
-            landmark_list=pose_landmarks,
+            image=annotated_image, landmark_list=pose_landmarks,
             connections=vision.PoseLandmarksConnections.POSE_LANDMARKS,
-            landmark_drawing_spec=drawing_styles.get_default_pose_landmarks_style(),
-            connection_drawing_spec=drawing_utils.DrawingSpec(color=(0, 255, 0), thickness=2)
+            landmark_drawing_spec=drawing_styles.get_default_pose_landmarks_style()
         )
     
     latest_annotated_frame = cv.cvtColor(annotated_image, cv.COLOR_RGB2BGR)
@@ -91,28 +102,20 @@ def main():
 
             image_rgb = cv.cvtColor(frame, cv.COLOR_BGR2RGB)
             mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=image_rgb)
-            
-            timestamp_ms = int(time.time() * 1000)
-            landmarker.detect_async(mp_image, timestamp_ms)
+            landmarker.detect_async(mp_image, int(time.time() * 1000))
             
             display_frame = latest_annotated_frame if latest_annotated_frame is not None else frame
             
-            # Visual Feedback
-            color = (0, 255, 0) if "Good" in posture_status else (0, 0, 255)
-            cv.putText(display_frame, f"STATUS: {posture_status}", (20, 50), 
-                       cv.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
-            
-            # Subtle HUD for live metrics
-            cv.putText(display_frame, f"Z-Depth: {current_metrics['z_depth']:.2f}", (20, 80), 
-                       cv.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+            # UI Styling
+            text_color = (0, 0, 255) if alert_active else (0, 255, 0)
+            if "CALIBRATING" in posture_status: text_color = (0, 255, 255) # Yellow
 
-            cv.imshow('Posture Correction', display_frame)
+            cv.putText(display_frame, posture_status, (20, 50), 
+                       cv.FONT_HERSHEY_SIMPLEX, 0.8, text_color, 2)
             
-            key = cv.waitKey(1) & 0xFF
-            if key == ord('c'):
-                print(f"DEBUG | Gap: {current_metrics['gap']:.4f} | Z: {current_metrics['z_depth']:.4f}")
-            elif key == ord('q'):
-                break
+            cv.imshow('Smart Posture Tracker', display_frame)
+            
+            if cv.waitKey(1) & 0xFF == ord('q'): break
 
     cap.release()
     cv.destroyAllWindows()
